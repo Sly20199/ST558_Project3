@@ -1,0 +1,61 @@
+---
+title: "ST558_Project3_EDA"
+author: "Stephanie Shuai"
+format: html
+editor: visual
+---
+
+# Introduction
+
+## Data Description
+
+The Water Potability dataset contains water quality metrics for 3,276 water samples. Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for humen potable or not.
+
+## Purpose
+
+The goal of this exploratory data analysis is to understand the distributions and relationships among the water quality variables, particularly as they relate to Potability(our response variable). We want to identify which physicochemical properties differ between potable and non-potable water and assess whether any strong patterns or correlations exist. This EDA will inform the development of a classification model to predict water potability based on these features.
+
+# DATA
+
+## Load Libraries
+
+```{r}
+library(tidyverse)
+library(readr)
+
+```
+
+```{r}
+water <- read_csv("water_potability.csv")
+head(water)
+```
+
+```{r}
+str(water)
+```
+
+# Checking the Data
+
+## Step 1: Check for Missingness
+
+Let's examine the number and percentage of missing values for each variable.
+
+```{r}
+missing_counts <- colSums(is.na(water))
+missing_pct <- round(100* missing_counts / nrow(water), 2)
+
+missing_summary <- tibble(
+  Variable = names(missing_counts),
+  Missing_Count = missing_counts,
+  Missing_Percent = missing_pct
+)
+
+missing_summary
+```
+
+## Step 2: Check Column Types and Values
+Let's verify that all column types. All predictor variables should be numeric, and `Potability` should be treated as a factor. 
+```{r}
+summary(water)
+```
+
