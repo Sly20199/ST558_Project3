@@ -9,7 +9,7 @@ editor: visual
 
 ## Data Description
 
-The Water Potability dataset contains water quality metrics for 3,276 water samples. Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for humen potable or not.
+The Water Potability dataset contains water quality metrics for 3,276 water samples. Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for human potable or not.
 
 ## Purpose
 
@@ -22,11 +22,21 @@ The goal of this exploratory data analysis is to understand the distributions an
 ```{r}
 library(tidyverse)
 library(readr)
-
+library(psych)
+library(tidymodels)
 ```
 
+## Import the Data
+
+We use relative path to import the data.
+
 ```{r}
-water <- read_csv("water_potability.csv")
+water <- read_csv("water_potability.csv", show_col_types = FALSE)
+```
+
+Let's take a first look at the data to understand its structure and dimensions.
+
+```{r}
 head(water)
 ```
 
@@ -34,28 +44,246 @@ head(water)
 str(water)
 ```
 
-# Checking the Data
+```{r}
+dim(water)
+```
+
+The dataset has 3,276 observations and 10 variables. \# Checking the Data
 
 ## Step 1: Check for Missingness
 
 Let's examine the number and percentage of missing values for each variable.
 
 ```{r}
-missing_counts <- colSums(is.na(water))
-missing_pct <- round(100* missing_counts / nrow(water), 2)
+sum_na <- function(column) {
+  sum(is.na(column))
+}
 
-missing_summary <- tibble(
-  Variable = names(missing_counts),
-  Missing_Count = missing_counts,
-  Missing_Percent = missing_pct
-)
+na_counts <- water |>
+  summarize(across(everything(), sum_na))
 
-missing_summary
+na_counts
 ```
+
+We can see `ph`, `Sulfate`, and `Trihalomethanes` contain missing values.
 
 ## Step 2: Check Column Types and Values
-Let's verify that all column types. All predictor variables should be numeric, and `Potability` should be treated as a factor. 
+
+Let's verify that all column types. All predictor variables should be numeric, and `Potability` should be treated as a factor.
+
 ```{r}
-summary(water)
+glimpse(water)
 ```
 
+The summary statistics: - `ph` ranges from 0 to 14. The mean (7.08) and median (7.04) are very close, suggesting a roughly symmetric distribution. - `Solids` and `Conductivity` has a wide range, and the mean exceeds the median, indicating a right skew. - `Hardness`,`Chloramines`, `Sulfate`, `Trihalomethanes`, `Organic_carbon`, and `Turbidity` have narrower range with mean close to their medians, suggesting symmetric distribution.
+
+Let's also check the unique values of `Potability` before converting it to a factor:
+
+```{r}
+unique(water$Potability)
+```
+
+`Potability` contains only 0 and 1, confirming it is a binary variable.
+
+## Step 3: Rename Variables and Convert Types
+
+Let's rename all variables to lower snake_case for consistency using `rename_with` and convert `Potability` into a factor.
+
+```{r}
+water <- water |> 
+  rename_with(tolower) |>
+  mutate(
+    potability = factor(potability, levels = c(0,1), labels = c("Not Potable", "Potable"))
+  )
+```
+
+Let's verify the changes:
+
+```{r}
+str(water)
+```
+
+```{r}
+table(water$potability)
+prop.table(table(water$potability))
+```
+
+We can see that the classes are imbalanced, with approximately 61% of samples are not potable and 39% are potable.
+
+# Summarizations
+
+Let's produce meaningful summary statistics and visualizations to explore the relationships in the data.
+
+## Summary Statistics: Overall
+
+Let's compute key descriptive statistics for each numeric predictor. This gives us a baseline understanding of the center, spread, and range of each variables.
+
+```{r}
+water |>
+  select(where(is.numeric)) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "value") |>
+  group_by(variable) |>
+  summarise(
+    n = sum(!is.na(value)),
+    mean = round(mean(value, na.rm = TRUE), 2),
+    median = round(median(value, na.rm = TRUE), 2),
+    sd = round(sd(value, na.rm = TRUE), 2),
+    min = round(min(value, na.rm = TRUE), 2),
+    max = round(max(value, na.rm = TRUE), 2)
+  )
+```
+
+## Summary Statistics: Grouped by Potability
+
+We want to see if the distribution of the predictors differ between potable and non-potable water.
+
+```{r}
+water |>
+  select(where(is.numeric), potability) |>
+  pivot_longer(-potability, names_to = "variable", values_to = "value") |>
+  group_by(potability, variable) |>
+  summarise(
+    n = sum(!is.na(value)),
+    mean = round(mean(value, na.rm = TRUE), 2),
+    median = round(median(value, na.rm = TRUE), 2),
+    sd = round(sd(value, na.rm = TRUE), 2),
+    .groups = "drop"
+  ) |>
+  arrange(variable, potability)
+```
+
+## Visualization
+
+### Distribution of the Response Variable
+
+```{r}
+ggplot(water, aes(x = potability, fill = potability)) + 
+  geom_bar() +
+  labs(
+    title = "Distribution of Water Potability",
+    x = "Potability",
+    y = "Count"
+  ) +
+  scale_fill_manual(values = c("Not Potable" = "#E74C3C", "Potable" = "#2ECC71")) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Histogram of All Numeric Predictors
+
+Let's visualize the distribution of each predictor, colored by potability class.
+
+```{r, warning=FALSE}
+water |>
+  select(where(is.numeric), potability) |>
+  pivot_longer(-potability, names_to = "variable", values_to = "value") |>
+  ggplot(aes(x = value, fill = potability)) +
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity") +
+  facet_wrap(~ variable, scales = "free", ncol = 3) +
+  labs(
+    title = "Distribution of Predictors by Potability",
+    x = "Value",
+    y = "Count",
+    fill = "Potability"
+  ) +
+  scale_fill_manual(values = c("Not Potable" = "#E74C3C", "Potable" = "#2ECC71")) +
+  theme_minimal() 
+
+```
+
+### Boxplots by Potability
+
+Boxplots allow us to compare the central tendency and spread of each predictor across potability groups.
+
+```{r,warning=FALSE}
+water |>
+  select(where(is.numeric), potability) |>
+  pivot_longer(-potability, names_to = "variable", values_to = "value") |>
+  ggplot(aes(x = potability, y = value, fill = potability)) +
+  geom_boxplot(alpha = 0.7)+
+  facet_wrap(~ variable, scales = "free_y", ncol = 3) +
+  labs(
+    title = "Boxplots of Predictors by Potability",
+    x = "Potability",
+    y = "Value",
+  ) +
+  scale_fill_manual(values = c("Not Potable" = "#E74C3C", "Potable" = "#2ECC71")) +
+  theme_minimal() 
+```
+
+### Correlation Analysis
+
+Let's examine the correlations between all numeric predictors.
+
+```{r}
+water_cor <- water |>
+  mutate(potability_num = as.numeric(potability) - 1) |>
+  select(where(is.numeric)) |>
+  cor(use = "pairwise.complete.obs")
+
+round(water_cor, 2)
+
+water_count_cor <- tibble(
+  variable = rownames(water_cor),
+  correlation_with_potability = water_cor[, "potability_num"]) |>
+  filter(variable != "potability_num") |>
+  arrange(desc(abs(correlation_with_potability))) 
+
+water_count_cor
+```
+
+# Split the data
+
+We will use the `tidymodels` framework to split the data into training and testing sets, and create cross-validation folds on the training sets.
+
+## Handle Missing Values Before Splitting
+
+We impute missing values with the column mean using `tidyr::replace_na()`.
+
+```{r}
+water_clean <- water |>
+  replace_na(list(
+    ph = mean(water$ph, na.rm = TRUE),
+    sulfate = mean(water$sulfate, na.rm = TRUE),
+    trihalomethanes = mean(water$trihalomethanes, na.rm = TRUE)
+  ))
+```
+
+```{r}
+colSums(is.na(water_clean))
+```
+
+## Train/Test Split(75/25, Stratified on Potability)
+
+We use `intial_split` from `tidymodels` with the`strate` argument to ensure that the proportion of potable vs. non-potable is preserved in both the training and testing sets.
+
+```{r}
+set.seed(123)
+
+water_split <- initial_split(water_clean, prop = 0.75, strata = potability)
+water_train <- training(water_split)
+water_test <- testing(water_split)
+
+water_train |>
+  count(potability) |>
+  mutate(prop = n / sum(n))
+
+water_test |>
+  count(potability) |>
+  mutate(prop = n / sum(n))
+
+```
+
+Both sets maintain approximately the same proportion of portable vs. non-portable samples,\
+confirming that the stratified split worked correctly.
+
+## 10-Fold Cross-Validation
+
+On the training set, we create a 10-fold cross-validation split. This will be used for model tuning and evluation.
+
+```{r}
+set.seed(123)
+
+water_folds <- vfold_cv(water_train, v = 10, strata = potability)
+water_folds
+```
