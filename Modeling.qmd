@@ -5,3 +5,103 @@ format: html
 editor: visual
 ---
 
+# Introduction
+
+In our exploratory data analysis, we investigated the water potability dataset, which contains 3,276 water samples and 10 variables. The goal of this analysis is to build a model of predicting `potability` (whether water is safe for human consumption).
+
+Our EDA revealed that the target variables is imbalanced and that individual predictors do not linearly separate the classes well. Therefore, we will rely on non-linear algorithms using the `tidymodels` framework. We will evaluate two models: a **Classification Tree** and a **Random Forest**, comparing them based on their logarithmic loss(`log-loss`).
+
+# Setup and Data Preparation
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(tree)
+```
+
+First, we load the raw dataset, convert their column names to lowercase, and format the response variable `potability` as a factor.
+
+```{r}
+water <- read_csv("water_potability.csv", show_col_types = FALSE) |>
+  rename_with(tolower) |>
+  mutate(
+    potability = factor(potability, levels = c(0,1), labels = c("Not Potable", "Potable"))
+  )
+```
+
+# Data Splitting
+
+We will use the `tidymodels` framework to split the data into training and testing sets, and create cross-validation folds on the training sets.
+
+## Handle Missing Values Before Splitting
+
+We impute missing values with the column mean using `tidyr::replace_na()`.
+
+```{r}
+water_clean <- water |>
+  replace_na(list(
+    ph = mean(water$ph, na.rm = TRUE),
+    sulfate = mean(water$sulfate, na.rm = TRUE),
+    trihalomethanes = mean(water$trihalomethanes, na.rm = TRUE)
+  ))
+```
+
+```{r}
+colSums(is.na(water_clean))
+```
+
+## Train/Test Split(70/30, Stratified on Potability)
+
+We use `initial_split` from `tidymodels` with the`strata` argument to ensure that the proportion of potable vs. non-potable is preserved in both the training and testing sets.
+
+```{r}
+set.seed(123)
+
+# 70/30 split
+water_split <- initial_split(water_clean, prop = 0.70, strata = potability)
+water_train <- training(water_split)
+water_test <- testing(water_split)
+
+# Check proportions
+water_train |>
+  count(potability) |>
+  mutate(prop = n / sum(n))
+
+water_test |>
+  count(potability) |>
+  mutate(prop = n / sum(n))
+
+```
+
+Both sets maintain approximately the same proportion of potable vs. non-potable samples, confirming that the stratified split worked correctly.
+
+## 5-Fold Cross-Validation
+
+On the training set, we create a 5-fold cross-validation split. This will be used for model tuning and evaluation.
+
+```{r}
+set.seed(123)
+
+water_folds <- vfold_cv(water_train, v = 5, strata = potability)
+water_folds
+```
+
+## Recipe
+
+Our EDA revealed missing values in `ph`, `sulfate`, and `trihalomethan`. Instead of dropping these rows, we will impute the missing values with the mean of each column.
+
+```{r}
+water_rec <- recipe(potability ~., data = water_train) |>
+  step_impute_mean(ph, sulfate, trihalomethanes) |>
+  step_normalize(all_numeric_predictors())
+```
+
+------------------------------------------------------------------------
+
+# Model 1: Classification Tree
+
+## Understanding Classification Trees
+
+A **Classification Tree** is a supervised learning algorithm that works by repeatedly splitting the data into distinct groups based on the predictor variables.
+
+# Random Forest
