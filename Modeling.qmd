@@ -16,7 +16,7 @@ Our EDA revealed that the target variables is imbalanced and that individual pre
 ```{r}
 library(tidyverse)
 library(tidymodels)
-library(tree)
+library(rpart)
 ```
 
 First, we load the raw dataset, convert their column names to lowercase, and format the response variable `potability` as a factor.
@@ -70,7 +70,6 @@ water_train |>
 water_test |>
   count(potability) |>
   mutate(prop = n / sum(n))
-
 ```
 
 Both sets maintain approximately the same proportion of potable vs. non-potable samples, confirming that the stratified split worked correctly.
