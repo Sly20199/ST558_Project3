@@ -9,8 +9,7 @@ editor: visual
 
 ## Data Description
 
-The Water Potability dataset contains water quality metrics for 3,276 water samples.
-Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for human potable or not.
+The Water Potability dataset contains water quality metrics for 3,276 water samples. Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for human potable or not.
 
 The variables in this dataset are:
 
@@ -238,7 +237,7 @@ water |>
 
 ```
 
-The histogram shows that potable and non-potable water samples have nearly identical distributions across all nine predictors. Most variables follow a bell-shaped distribution for both classes. Solids is the exception, displaying a right skewed shape with a long tail. 
+The histogram shows that potable and non-potable water samples have nearly identical distributions across all nine predictors. Most variables follow a bell-shaped distribution for both classes. Solids is the exception, displaying a right skewed shape with a long tail.
 
 ### Boxplots by Potability
 
@@ -259,11 +258,12 @@ water |>
   scale_fill_manual(values = c("Not Potable" = "#E74C3C", "Potable" = "#2ECC71")) +
   theme_minimal() 
 ```
+
 Across all nine predictors, the median, IQR, and whisker lengths are nearly identically between potable and non-potable. `solids` stands out with a wider spread and more outliers, but both classes behave identically.
 
 ### Correlation Analysis
 
-Let's examine the correlations between all numeric predictors and their relationship with potability. 
+Let's examine the correlations between all numeric predictors and their relationship with potability.
 
 ```{r}
 water_cor <- water |>
@@ -273,8 +273,8 @@ water_cor <- water |>
 
 round(water_cor, 2)
 ```
-The correlations between all nine predictors are very small. This indicates low multicollinearity, meaning each predictors carries largely independent information. 
 
+The correlations between all nine predictors are very small. This indicates low multicollinearity, meaning each predictors carries largely independent information.
 
 ```{r}
 water_count_cor <- tibble(
@@ -285,7 +285,8 @@ water_count_cor <- tibble(
   
 water_count_cor
 ```
-None of the predictors have a pratically meaningful linear relationship with water potability. 
+
+None of the predictors have a pratically meaningful linear relationship with water potability.
 
 ------------------------------------------------------------------------
 

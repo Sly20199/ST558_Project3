@@ -17,6 +17,7 @@ Our EDA revealed that the target variables is imbalanced and that individual pre
 library(tidyverse)
 library(tidymodels)
 library(rpart)
+library(ranger)
 ```
 
 First, we load the raw dataset, convert their column names to lowercase, and format the response variable `potability` as a factor.
@@ -97,10 +98,167 @@ water_rec <- recipe(potability ~., data = water_train) |>
 
 ------------------------------------------------------------------------
 
-# Model 1: Classification Tree
+# Model 1: Classification Tree Model
 
-## Understanding Classification Trees
+## Understanding Classification Tree Model
 
 A **Classification Tree** is a supervised learning algorithm that works by repeatedly splitting the data into distinct groups based on the predictor variables.
 
-# Random Forest
+## Tuning the Classification Tree Model
+
+We will fit a classification treee using the `rpart` engine, leaving `cost_complexity` open for tuning.
+
+```{r}
+# Specify the model
+tree_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune()
+) |>
+  set_engine("rpart") |>
+  set_mode("classification")
+
+# Create the workflow
+tree_wkf <- workflow() |>
+  add_recipe(water_rec) |>
+  add_model(tree_spec)   
+
+# Create a tuning grid
+tree_grid <- grid_regular(
+  cost_complexity(),
+  tree_depth(),
+  levels = 5
+)
+```
+
+Now we tune the model across our 5-fold cross-validation sets. We will evulate performance using **log-loss** (which measures the accuracy of predicted probabilities).
+
+```{r}
+# Define our metric set (Log-Loss)
+eval_metrics <- metric_set(mn_log_loss)
+
+# Tune the model
+set.seed(123)
+tree_res <- tune_grid(
+  tree_wkf,
+  resamples = water_folds,
+  grid = tree_grid,
+  metrics = eval_metrics
+)
+```
+
+Let's look at the top 5 hyperparameter combinations based on lowest log-loss:
+
+```{r}
+tree_res |>
+  collect_metrics() |>
+  filter(.metric == "mn_log_loss") |>
+  arrange(mean)
+```
+
+# Random Forest Model
+
+A **Random Forest** is an ensemble method that builds upon the classification tree. Instead of training one tree, it trains hundreds of trees. To ensure the trees are diverse, each tree is trained on a random sample of the data, and at each split, it only considers a random subset of the predictors.
+
+We will tune three parameters:
+
+-   `mtry`: The number of predictors randomly sampled at each split.
+
+-   `trees`: The total number of trees to grow.
+
+-   `min_n`: The minimum number of data points in a node required to split it further.
+
+```{r}
+# Specify the model
+rf_spec <- rand_forest(
+  mtry = tune(),
+  trees = tune(),
+  min_n = tune()
+) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+# Create the workflow
+rf_wkf <- workflow() |>
+  add_recipe(water_rec) |>
+  add_model(rf_spec)
+
+# Create a tuning grid 
+rf_grid <- grid_regular(
+  mtry(range = c(2,7)),
+  trees(range = c(100, 300)),
+  min_n(range = c(5, 20)),
+  levels = 3
+)
+```
+
+Tune the random forest:
+```{r}
+set.seed(123)
+rf_res <- tune_grid(
+  rf_wkf,
+  resamples = water_folds,
+  grid = rf_grid,
+  metrics = eval_metrics
+)
+
+rf_res |>
+  collect_metrics() |>
+  filter(.metric == "mn_log_loss") |>
+  arrange(mean)
+```
+
+-----------
+
+# Final Model Selection
+
+We will now compare the best log-loss scores from both models to select the final winner. 
+```{r}
+best_tree_logloss <- tree_res |>
+  show_best(metric = "mn_log_loss", n = 1) |>
+  pull(mean)
+
+best_rf_logloss <- rf_res |>
+  show_best(metric = "mn_log_loss", n = 1) |>
+  pull(mean)
+
+round(best_tree_logloss,3)
+round(best_rf_logloss,3)
+```
+
+The results show that the **Random Forest**(log-loss = 0.613) outperforms the Classification Tree(log-loss=0.666). Since lower log-loss indicates better probability calibration, the Random Forest is the winner. 
+
+## Final Fit and Evaluation
+
+We will finalize the random forest workflow with its optimal hyperparameters, fit it to the entire training set, and evaluate it one last time on the untouched test set.
+
+```{r}
+# Select best parameters
+best_rf_params <- rf_res |>
+  select_best(metric = "mn_log_loss")
+
+# Finalize workflow
+final_rf_wkf <- rf_wkf |>
+  finalize_workflow(best_rf_params)
+
+# Perform final fit
+final_fit <- final_rf_wkf |>
+  last_fit(water_split, metrics = metric_set(accuracy, mn_log_loss))
+
+# View test set metrics
+final_fit |>
+  collect_metrics()
+```
+
+## Save Model for API Deployment
+
+We extract the fully trained workflow (fitted on the complete training set) and save it as an `.rds` file. This file will be loaded by our `plumber` API script to serve predictions inside our Docker container. 
+
+```{r}
+# Extract the finalized, fitted workflow
+best_model <- final_fit |>
+  extract_workflow()
+
+# Save the model 
+saveRDS(best_model, "best_model.rds")
+```
+
