@@ -11,3 +11,8 @@ website:
       - href: Modeling.qmd
         text: Modeling
         
+        
+format: 
+  html: 
+    theme: cosmo
+    
