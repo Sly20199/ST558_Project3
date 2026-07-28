@@ -7,7 +7,7 @@ editor: visual
 
 # Introduction
 
-In our exploratory data analysis, we investigated the water potability dataset, which contains 3,276 water samples and 10 variables. The goal of this analysis is to build a model of predicting `potability` (whether water is safe for human consumption).
+In our exploratory data analysis, we investigated the water potability data set, which contains 3,276 water samples and 10 variables. The goal of this analysis is to build a model of predicting `potability` (whether water is safe for human consumption).
 
 Our EDA revealed that the target variables is imbalanced and that individual predictors do not linearly separate the classes well. Therefore, we will rely on non-linear algorithms using the `tidymodels` framework. We will evaluate two models: a **Classification Tree** and a **Random Forest**, comparing them based on their logarithmic loss(`log-loss`).
 
@@ -20,7 +20,7 @@ library(rpart)
 library(ranger)
 ```
 
-First, we load the raw dataset, convert their column names to lowercase, and format the response variable `potability` as a factor.
+First, we load the raw data set, convert their column names to lowercase, and format the response variable `potability` as a factor.
 
 ```{r}
 water <- read_csv("water_potability.csv", show_col_types = FALSE) |>
@@ -34,22 +34,6 @@ water <- read_csv("water_potability.csv", show_col_types = FALSE) |>
 
 We will use the `tidymodels` framework to split the data into training and testing sets, and create cross-validation folds on the training sets.
 
-## Handle Missing Values Before Splitting
-
-We impute missing values with the column mean using `tidyr::replace_na()`.
-
-```{r}
-water_clean <- water |>
-  replace_na(list(
-    ph = mean(water$ph, na.rm = TRUE),
-    sulfate = mean(water$sulfate, na.rm = TRUE),
-    trihalomethanes = mean(water$trihalomethanes, na.rm = TRUE)
-  ))
-```
-
-```{r}
-colSums(is.na(water_clean))
-```
 
 ## Train/Test Split(70/30, Stratified on Potability)
 
@@ -59,7 +43,7 @@ We use `initial_split` from `tidymodels` with the`strata` argument to ensure tha
 set.seed(123)
 
 # 70/30 split
-water_split <- initial_split(water_clean, prop = 0.70, strata = potability)
+water_split <- initial_split(water, prop = 0.70, strata = potability)
 water_train <- training(water_split)
 water_test <- testing(water_split)
 
@@ -133,8 +117,6 @@ tree_grid <- grid_regular(
 Now we tune the model across our 5-fold cross-validation sets. We will evulate performance using **log-loss** (which measures the accuracy of predicted probabilities).
 
 ```{r}
-# Define our metric set (Log-Loss)
-eval_metrics <- metric_set(mn_log_loss)
 
 # Tune the model
 set.seed(123)
@@ -142,7 +124,7 @@ tree_res <- tune_grid(
   tree_wkf,
   resamples = water_folds,
   grid = tree_grid,
-  metrics = eval_metrics
+  metrics = metric_set(mn_log_loss)
 )
 ```
 
@@ -194,11 +176,12 @@ rf_grid <- grid_regular(
 Tune the random forest:
 ```{r}
 set.seed(123)
+
 rf_res <- tune_grid(
   rf_wkf,
   resamples = water_folds,
   grid = rf_grid,
-  metrics = eval_metrics
+  metrics = metric_set(mn_log_loss)
 )
 
 rf_res |>
@@ -211,43 +194,49 @@ rf_res |>
 
 # Final Model Selection
 
-We will now compare the best log-loss scores from both models to select the final winner. 
-```{r}
-best_tree_logloss <- tree_res |>
-  show_best(metric = "mn_log_loss", n = 1) |>
-  pull(mean)
-
-best_rf_logloss <- rf_res |>
-  show_best(metric = "mn_log_loss", n = 1) |>
-  pull(mean)
-
-round(best_tree_logloss,3)
-round(best_rf_logloss,3)
-```
-
-The results show that the **Random Forest**(log-loss = 0.613) outperforms the Classification Tree(log-loss=0.666). Since lower log-loss indicates better probability calibration, the Random Forest is the winner. 
-
 ## Final Fit and Evaluation
 
 We will finalize the random forest workflow with its optimal hyperparameters, fit it to the entire training set, and evaluate it one last time on the untouched test set.
 
 ```{r}
 # Select best parameters
+best_tree_params <- tree_res |>
+  select_best(metric = "mn_log_loss")
+
 best_rf_params <- rf_res |>
   select_best(metric = "mn_log_loss")
 
 # Finalize workflow
+final_tree_wkf <- tree_wkf |>
+  finalize_workflow(best_tree_params)
+
 final_rf_wkf <- rf_wkf |>
   finalize_workflow(best_rf_params)
 
-# Perform final fit
-final_fit <- final_rf_wkf |>
+# Final fit 
+tree_test_fit <- final_tree_wkf |>
+  last_fit(water_split, metrics = metric_set(accuracy, mn_log_loss))
+
+rf_test_fit <- final_rf_wkf |>
   last_fit(water_split, metrics = metric_set(accuracy, mn_log_loss))
 
 # View test set metrics
-final_fit |>
-  collect_metrics()
+tree_test_metrics <- tree_test_fit |>
+  collect_metrics() |>
+  mutate(model = "Classification Tree")
+
+rf_test_metrics <- rf_test_fit |>
+  collect_metrics() |>
+  mutate(model = "Random Forest")
+
+test_comparison <- bind_rows(tree_test_metrics, rf_test_metrics) |>
+  select(model, .metric, .estimate) |>
+  pivot_wider(names_from = .metric, values_from = .estimate) 
+
+test_comparison
 ```
+
+Random Forest achieved lower mn_log_loss and higher accuracy on the test set than the Classification Tree.
 
 ## Save Model for API Deployment
 
@@ -255,7 +244,7 @@ We extract the fully trained workflow (fitted on the complete training set) and 
 
 ```{r}
 # Extract the finalized, fitted workflow
-best_model <- final_fit |>
+best_model <- rf_test_fit |>
   extract_workflow()
 
 # Save the model 

@@ -9,9 +9,9 @@ editor: visual
 
 ## Data Description
 
-The Water Potability dataset contains water quality metrics for 3,276 water samples. Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for human potable or not.
+The Water Potability data set contains water quality metrics for 3,276 water samples. Each observation includes nine physicochemical properties of the water along with a binary label indicating whether the water is safe for human potable or not.
 
-The variables in this dataset are:
+The variables in this data set are:
 
 1.  `ph`: pH value of the water (0 to 14).
 
@@ -71,7 +71,7 @@ str(water)
 dim(water)
 ```
 
-The dataset has 3,276 observations and 10 variables.
+The data set has 3,276 observations and 10 variables.
 
 ------------------------------------------------------------------------
 
@@ -213,7 +213,7 @@ ggplot(water, aes(x = potability, fill = potability)) +
   theme(legend.position = "none")
 ```
 
-The dataset is imbalanced. There are 1,998 samples of non-potable compared to 1278 of potable samples.
+The dat aset is imbalanced. There are 1,998 samples of non-potable compared to 1278 of potable samples.
 
 ### Histogram of All Numeric Predictors
 
@@ -302,4 +302,4 @@ None of the predictors have a pratically meaningful linear relationship with wat
 
 4.  The correlation analysis shows weak linear relationships between predictors and `potability`.
 
-[Click here for the Modeling Page]()
+[Click here for the Modeling Page](Modeling.html)
