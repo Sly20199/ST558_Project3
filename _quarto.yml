@@ -1,3 +1,13 @@
 project:
   type: website
   output-dir: docs
+
+website: 
+  title: "ST558 Project 3"
+  navbar: 
+    left: 
+      - href: EDA.qmd
+        text: EDA
+      - href: Modeling.qmd
+        text: Modeling
+        
