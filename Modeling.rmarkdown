@@ -1,0 +1,254 @@
+---
+title: "ST558_Project3_Modeling"
+author: "Stephanie Shuai"
+format: html
+editor: visual
+---
+
+# Introduction
+
+In our exploratory data analysis, we investigated the water potability data set, which contains 3,276 water samples and 10 variables. The goal of this analysis is to build a model of predicting `potability` (whether water is safe for human consumption).
+
+Our EDA revealed that the target variables is imbalanced and that individual predictors do not linearly separate the classes well. Therefore, we will rely on non-linear algorithms using the `tidymodels` framework. We will evaluate two models: a **Classification Tree** and a **Random Forest**, comparing them based on their logarithmic loss(`log-loss`).
+
+# Setup and Data Preparation
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(rpart)
+library(ranger)
+```
+
+First, we load the raw data set, convert their column names to lowercase, and format the response variable `potability` as a factor.
+
+```{r}
+water <- read_csv("water_potability.csv", show_col_types = FALSE) |>
+  rename_with(tolower) |>
+  mutate(
+    potability = factor(potability, levels = c(0,1), labels = c("Not Potable", "Potable"))
+  )
+```
+
+# Data Splitting
+
+We will use the `tidymodels` framework to split the data into training and testing sets, and create cross-validation folds on the training sets.
+
+
+## Train/Test Split(70/30, Stratified on Potability)
+
+We use `initial_split` from `tidymodels` with the`strata` argument to ensure that the proportion of potable vs. non-potable is preserved in both the training and testing sets.
+
+```{r}
+set.seed(123)
+
+# 70/30 split
+water_split <- initial_split(water, prop = 0.70, strata = potability)
+water_train <- training(water_split)
+water_test <- testing(water_split)
+
+# Check proportions
+water_train |>
+  count(potability) |>
+  mutate(prop = n / sum(n))
+
+water_test |>
+  count(potability) |>
+  mutate(prop = n / sum(n))
+```
+
+Both sets maintain approximately the same proportion of potable vs. non-potable samples, confirming that the stratified split worked correctly.
+
+## 5-Fold Cross-Validation
+
+On the training set, we create a 5-fold cross-validation split. This will be used for model tuning and evaluation.
+
+```{r}
+set.seed(123)
+
+water_folds <- vfold_cv(water_train, v = 5, strata = potability)
+water_folds
+```
+
+## Recipe
+
+Our EDA revealed missing values in `ph`, `sulfate`, and `trihalomethan`. Instead of dropping these rows, we will impute the missing values with the mean of each column.
+
+```{r}
+water_rec <- recipe(potability ~., data = water_train) |>
+  step_impute_mean(ph, sulfate, trihalomethanes) |>
+  step_normalize(all_numeric_predictors())
+```
+
+------------------------------------------------------------------------
+
+# Model 1: Classification Tree Model
+
+## Understanding Classification Tree Model
+
+A **Classification Tree** is a supervised learning algorithm that works by repeatedly splitting the data into distinct groups based on the predictor variables.
+
+## Tuning the Classification Tree Model
+
+We will fit a classification treee using the `rpart` engine, leaving `cost_complexity` open for tuning.
+
+```{r}
+# Specify the model
+tree_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune()
+) |>
+  set_engine("rpart") |>
+  set_mode("classification")
+
+# Create the workflow
+tree_wkf <- workflow() |>
+  add_recipe(water_rec) |>
+  add_model(tree_spec)   
+
+# Create a tuning grid
+tree_grid <- grid_regular(
+  cost_complexity(),
+  tree_depth(),
+  levels = 5
+)
+```
+
+Now we tune the model across our 5-fold cross-validation sets. We will evulate performance using **log-loss** (which measures the accuracy of predicted probabilities).
+
+```{r}
+
+# Tune the model
+set.seed(123)
+tree_res <- tune_grid(
+  tree_wkf,
+  resamples = water_folds,
+  grid = tree_grid,
+  metrics = metric_set(mn_log_loss)
+)
+```
+
+Let's look at the top 5 hyperparameter combinations based on lowest log-loss:
+
+```{r}
+tree_res |>
+  collect_metrics() |>
+  filter(.metric == "mn_log_loss") |>
+  arrange(mean)
+```
+
+# Random Forest Model
+
+A **Random Forest** is an ensemble method that builds upon the classification tree. Instead of training one tree, it trains hundreds of trees. To ensure the trees are diverse, each tree is trained on a random sample of the data, and at each split, it only considers a random subset of the predictors.
+
+We will tune three parameters:
+
+-   `mtry`: The number of predictors randomly sampled at each split.
+
+-   `trees`: The total number of trees to grow.
+
+-   `min_n`: The minimum number of data points in a node required to split it further.
+
+```{r}
+# Specify the model
+rf_spec <- rand_forest(
+  mtry = tune(),
+  trees = tune(),
+  min_n = tune()
+) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+# Create the workflow
+rf_wkf <- workflow() |>
+  add_recipe(water_rec) |>
+  add_model(rf_spec)
+
+# Create a tuning grid 
+rf_grid <- grid_regular(
+  mtry(range = c(2,7)),
+  trees(range = c(100, 300)),
+  min_n(range = c(5, 20)),
+  levels = 3
+)
+```
+
+Tune the random forest:
+```{r}
+set.seed(123)
+
+rf_res <- tune_grid(
+  rf_wkf,
+  resamples = water_folds,
+  grid = rf_grid,
+  metrics = metric_set(mn_log_loss)
+)
+
+rf_res |>
+  collect_metrics() |>
+  filter(.metric == "mn_log_loss") |>
+  arrange(mean)
+```
+
+-----------
+
+# Final Model Selection
+
+## Final Fit and Evaluation
+
+We will finalize the random forest workflow with its optimal hyperparameters, fit it to the entire training set, and evaluate it one last time on the untouched test set.
+
+```{r}
+# Select best parameters
+best_tree_params <- tree_res |>
+  select_best(metric = "mn_log_loss")
+
+best_rf_params <- rf_res |>
+  select_best(metric = "mn_log_loss")
+
+# Finalize workflow
+final_tree_wkf <- tree_wkf |>
+  finalize_workflow(best_tree_params)
+
+final_rf_wkf <- rf_wkf |>
+  finalize_workflow(best_rf_params)
+
+# Final fit 
+tree_test_fit <- final_tree_wkf |>
+  last_fit(water_split, metrics = metric_set(accuracy, mn_log_loss))
+
+rf_test_fit <- final_rf_wkf |>
+  last_fit(water_split, metrics = metric_set(accuracy, mn_log_loss))
+
+# View test set metrics
+tree_test_metrics <- tree_test_fit |>
+  collect_metrics() |>
+  mutate(model = "Classification Tree")
+
+rf_test_metrics <- rf_test_fit |>
+  collect_metrics() |>
+  mutate(model = "Random Forest")
+
+test_comparison <- bind_rows(tree_test_metrics, rf_test_metrics) |>
+  select(model, .metric, .estimate) |>
+  pivot_wider(names_from = .metric, values_from = .estimate) 
+
+test_comparison
+```
+
+Random Forest achieved lower mn_log_loss and higher accuracy on the test set than the Classification Tree.
+
+## Save Model for API Deployment
+
+We extract the fully trained workflow (fitted on the complete training set) and save it as an `.rds` file. This file will be loaded by our `plumber` API script to serve predictions inside our Docker container. 
+
+```{r}
+# Extract the finalized, fitted workflow
+best_model <- rf_test_fit |>
+  extract_workflow()
+
+# Save the model 
+saveRDS(best_model, "best_model.rds")
+```
+
+
