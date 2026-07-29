@@ -78,7 +78,7 @@ function( ph              = ph_mean,
 function() {
   list(
     author = "Stephanie Shuai",
-    github_pages = ""
+    github_pages = "https://sly20199.github.io/ST558_Project3/"
   )
 }
 
